@@ -1,14 +1,12 @@
 {
-  "name": "RADIO CAFE Attendance",
+  "name": "RADIO CAFE | Attendance",
   "short_name": "RADIO CAFE",
-  "description": "RADIO CAFE staff attendance management system",
+  "description": "RADIO CAFE online attendance system",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#08090c",
   "theme_color": "#08090c",
-  "orientation": "portrait",
-  "lang": "en",
   "icons": [
     {
       "src": "./icon-192.png",

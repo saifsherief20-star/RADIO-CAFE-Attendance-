@@ -43,6 +43,14 @@ body[data-theme="light"] th{border-color:#dfe2e8} body[data-theme="light"] td{bo
 body[data-theme="light"] .modal-box{background:#fff}
 </style>
 
+
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#08090c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/svg+xml" href="./icon.svg">
+<link rel="apple-touch-icon" href="./icon-192.png">
 </head>
 <body><div id="app"></div><div class="toast" id="toast"></div>
 
@@ -164,7 +172,7 @@ async function login(){
 }
 async function logout(){stopCloud();cloudReady=false;try{await fb.signOut(firebaseAuth)}catch(e){}data.session=null;localStorage.setItem(DBKEY,JSON.stringify(data));render()}
 function loginPage(){
- document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint>🔒 Secure staff attendance system</div></div></div>`
+ document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint">🔒 Secure staff attendance system</div></div></div>`
 }
 function nav(id,icon,label){return `<button id="nav-${id}" onclick="showPage('${id}')">${icon} <span>${label}</span></button>`}
 function shell(){
@@ -195,7 +203,7 @@ function renderAttendance(){
  <div class="card"><h3>Live Clock</h3><div id="clock" style="font-size:32px;font-weight:800;color:var(--gold)">--:--:--</div><p class="sub">Shift: ${data.settings.shiftStart} → ${data.settings.shiftEnd} • Late after shift start</p></div></div>`;
  setInterval(()=>{let c=document.getElementById('clock');if(c)c.textContent=now().toLocaleTimeString('en-GB')},1000)
 }
-async function checkIn(){
+async async function checkIn(){
  let s=data.session,d=now();
  if(isWeeklyOff(s.id,d))return toast('📅 Today is your weekly day off.');
  if(isLeave(s.id,d))return toast('🏖️ You are on approved leave today.');
@@ -296,7 +304,17 @@ function exportExcel(){
 }
 function exportPDF(){
  let rows=exportRows(),w=window.open('','_blank');if(!w)return toast('Please allow popups for PDF export');
- w.document.write(`<html><head><title>Radio Cafe Attendance</title><style>body{font-family:Arial;padding:25px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:left}h1{margin-bottom:4px}</style></head><body><h1>RADIO CAFE — Attendance Report</h1><p>${monthKey(now())}</p><table><tr><th>Employee</th><th>Team</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td>${r.late?'Late':'Present'}</td></tr>`).join('')}</table><script>window.print()<\/script></body></html>`);w.document.close()
+ w.document.write(`<html><head><title>Radio Cafe Attendance</title><style>body{font-family:Arial;padding:25px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:left}h1{margin-bottom:4px}</style></head><body><h1>RADIO CAFE — Attendance Report</h1><p>${monthKey(now())}</p><table><tr><th>Employee</th><th>Team</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td>${r.late?'Late':'Present'}</td></tr>`).join('')}</table><script>window.print()<\/script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('./sw.js').catch(function (err) {
+      console.warn('PWA service worker registration failed:', err);
+    });
+  });
+}
+</script>
+</body></html>`);w.document.close()
 }
 function downloadBlob(content,name,type){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function render(){data.session?shell():loginPage()}
