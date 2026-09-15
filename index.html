@@ -203,7 +203,7 @@ function renderAttendance(){
  <div class="card"><h3>Live Clock</h3><div id="clock" style="font-size:32px;font-weight:800;color:var(--gold)">--:--:--</div><p class="sub">Shift: ${data.settings.shiftStart} → ${data.settings.shiftEnd} • Late after shift start</p></div></div>`;
  setInterval(()=>{let c=document.getElementById('clock');if(c)c.textContent=now().toLocaleTimeString('en-GB')},1000)
 }
-async async function checkIn(){
+async function checkIn(){
  let s=data.session,d=now();
  if(isWeeklyOff(s.id,d))return toast('📅 Today is your weekly day off.');
  if(isLeave(s.id,d))return toast('🏖️ You are on approved leave today.');
