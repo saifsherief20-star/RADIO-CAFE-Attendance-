@@ -159,7 +159,17 @@ async function login(){
   const email=u.includes('@')?u:`${u}@radiocafe.app`,cred=await fb.signInWithEmailAndPassword(firebaseAuth,email,p),us=await fb.getDoc(fb.doc(firebaseDb,'users',cred.user.uid));
   if(!us.exists())throw new Error('User profile is missing');const profile=us.data();
   data.session=profile.role==='Admin'?{id:'admin',uid:cred.user.uid,name:profile.name||'Administrator',role:'Admin',username:profile.username||u}:{id:String(profile.employeeId),uid:cred.user.uid,name:profile.name||u,role:profile.role||'Staff',username:profile.username||u};
-  cloudReady=true;await loadCloud();if(data.session.role!=='Admin'){const e=employee(data.session.id);if(e)data.session={...e,uid:cred.user.uid}}startCloud();render();
+  cloudReady=true;await loadCloud();
+  if(data.session.role!=='Admin'){
+    const e=employee(data.session.id);
+    if(!e){
+      try{await fb.signOut(firebaseAuth)}catch{}
+      cloudReady=false;data.session=null;localStorage.setItem(DBKEY,JSON.stringify(data));
+      return toast('This employee account has been deleted.');
+    }
+    data.session={...e,uid:cred.user.uid};
+  }
+  startCloud();render();
  }catch(e){console.error(e);toast(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found'?'Wrong username or password':(e.message||'Login failed'))}
 }
 async function logout(){stopCloud();cloudReady=false;try{await fb.signOut(firebaseAuth)}catch(e){}data.session=null;localStorage.setItem(DBKEY,JSON.stringify(data));render()}
