@@ -43,7 +43,7 @@ body[data-theme="light"] th{border-color:#dfe2e8} body[data-theme="light"] td{bo
 body[data-theme="light"] .modal-box{background:#fff}
 </style>
 
-<link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#08090c"><link rel="icon" type="image/svg+xml" href="./icon.svg"><link rel="apple-touch-icon" href="./icon-192.png"></head>
+</head>
 <body><div id="app"></div><div class="toast" id="toast"></div>
 
 
@@ -110,6 +110,7 @@ data.leaves=data.leaves||[];
 data.settings={...defaultData.settings,...(data.settings||{})};
 data.admin={...defaultData.admin,...(data.admin||{})};
 
+function $(id){return document.getElementById(id)}
 function save(){localStorage.setItem(DBKEY,JSON.stringify(data))}
 function now(){return new Date()}
 function fmt(d){return d?new Date(d).toLocaleString('en-GB',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short',year:'numeric'}):'—'}
@@ -154,28 +155,40 @@ function statsFor(empId,month){
 }
 window.firstSetup=firstSetup;
 async function login(){
- const email=$('loginEmail').value.trim(),pass=$('loginPass').value;
- if(!email||!pass)return toast('Enter email and password.');
- if(!firebaseReady)return toast('Firebase is not configured yet.');
+ let u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
+ if(!u||!p)return toast('Enter username and password');
  try{
-  const cred=await signInWithEmailAndPassword(auth,email,pass),u=cred.user;
-  let userDoc=null; try{userDoc=await getCloud('users',u.uid)}catch{}
-  const role=userDoc?.role||'employee';
-  if(role!=='Admin'){
-    const employeeId=userDoc?.employeeId;
-    let emp=null;
-    if(employeeId)try{emp=await getCloud('employees',employeeId)}catch{}
-    if(!emp){try{await signOut(auth)}catch{} data.session=null;save(); return toast('This employee account has been deleted.');}
-    data.session={uid:u.uid,email:u.email,role,name:emp.name||userDoc.name||u.email.split('@')[0],id:emp.id,team:emp.team||'',weeklyOff:emp.weeklyOff||'',image:emp.image||''};
+  const email=u.includes('@')?u:`${u}@radiocafe.app`;
+  const cred=await fb.signInWithEmailAndPassword(firebaseAuth,email,p);
+  const us=await fb.getDoc(fb.doc(firebaseDb,'users',cred.user.uid));
+  if(!us.exists())throw new Error('User profile is missing');
+  const profile=us.data();
+
+  // Admin is allowed through the admin profile.
+  if(profile.role==='Admin'){
+   data.session={id:'admin',uid:cred.user.uid,name:profile.name||'Administrator',role:'Admin',username:profile.username||u};
   }else{
-    data.session={uid:u.uid,email:u.email,role:'Admin',name:userDoc?.name||'Administrator',id:u.uid,team:'',weeklyOff:'',image:''};
+   // An employee must still have an active employee document.
+   const employeeId=String(profile.employeeId||'');
+   let e=null;
+   if(employeeId){
+    const ed=await fb.getDoc(fb.doc(firebaseDb,'employees',employeeId));
+    if(ed.exists())e={id:ed.id,...ed.data()};
+   }
+   if(!e)throw new Error('This employee account has been deleted.');
+   data.session={...e,uid:cred.user.uid};
   }
-  save();toast('Welcome back!');render();
- }catch(e){toast('Login failed: '+e.message)}
+
+  cloudReady=true;await loadCloud();startCloud();render();
+ }catch(e){
+  console.error(e);
+  try{await fb.signOut(firebaseAuth)}catch(_){}
+  toast(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found'?'Wrong username or password':(e.message||'Login failed'));
+ }
 }
 async function logout(){stopCloud();cloudReady=false;try{await fb.signOut(firebaseAuth)}catch(e){}data.session=null;localStorage.setItem(DBKEY,JSON.stringify(data));render()}
 function loginPage(){
- document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint>🔒 Secure staff attendance system</div></div></div>`
+ document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint">🔒 Secure staff attendance system</div></div></div>`
 }
 function nav(id,icon,label){return `<button id="nav-${id}" onclick="showPage('${id}')">${icon} <span>${label}</span></button>`}
 function shell(){
@@ -213,21 +226,25 @@ async function checkIn(){
  if(myRecord())return;
  let [hh,mm]=data.settings.shiftStart.split(':').map(Number),late=d.getHours()>hh||(d.getHours()===hh&&d.getMinutes()>mm);
  const record={id:Date.now(),empId:s.id,name:s.name,team:s.team,in:d.toISOString(),out:null,late};
- data.records.push(record); save();
  try{
-   if(!cloudReady)throw new Error('Cloud connection is not ready. Please wait a moment and try again.');
-   await putCloud('records',record.id,record);
-   toast(late?'⚠️ Checked in — marked late':'🟢 Check in successful!');
+  if(!cloudReady)throw new Error('Cloud connection is not ready.');
+  await putCloud('records',record.id,record);
+  data.records.push(record);save();
+  toast(late?'⚠️ Checked in — marked late':'🟢 Check in successful!');
+  renderAttendance();renderDashboard();renderRecords();renderProfile();
  }catch(e){
-   console.error(e); data.records=data.records.filter(r=>String(r.id)!==String(record.id)); save();
-   toast(e.message||'Could not save check in online'); return;
+  console.error(e);toast(e.message||'Could not save check in online');
  }
- renderAttendance();renderDashboard();renderRecords();renderProfile();
 }
-function checkOut(){let r=myRecord();if(!r)return;r.out=now().toISOString();r.minutes=workMinutes(r);save();if(cloudReady)putCloud('records',r.id,r);toast(`🔴 Check out successful! Worked ${hm(r.minutes)}`);renderAttendance();renderDashboard();renderRecords();renderProfile()}
-function table(list){
- if(!list.length)return `<p class="sub">No attendance records yet.</p>`;
- return `<table><thead><tr><th>Employee</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr></thead><tbody>${list.map(r=>`<tr><td><b>${esc(r.name)}</b><br><small style="color:var(--muted)">${esc(r.team||'')}</small></td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td><span class="badge ${r.late?'late':'present'}">${r.late?'LATE':'ON TIME'}</span>${!r.out?'<span class="badge late" style="margin-left:4px">NO CHECK OUT</span>':''}</td></tr>`).join('')}</tbody></table>`
+async function checkOut(){
+ let r=myRecord();if(!r)return;
+ r.out=now().toISOString();r.minutes=workMinutes(r);
+ try{
+  if(!cloudReady)throw new Error('Cloud connection is not ready.');
+  await putCloud('records',r.id,r);save();
+  toast(`🔴 Check out successful! Worked ${hm(r.minutes)}`);
+  renderAttendance();renderDashboard();renderRecords();renderProfile();
+ }catch(e){console.error(e);toast(e.message||'Could not save check out online')}
 }
 function renderRecords(){
  let el=document.getElementById('records');if(!el)return;
@@ -309,13 +326,5 @@ function exportPDF(){
 function downloadBlob(content,name,type){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function render(){data.session?shell():loginPage()}
 render();
-</script>
-<button id="pwaInstall" style="display:none;position:fixed;right:18px;bottom:18px;z-index:9999;padding:12px 16px;border:1px solid #e4b75d;border-radius:12px;background:#111317;color:#e4b75d;font-weight:800;cursor:pointer;box-shadow:0 8px 30px #0008">📲 Install App</button>
-<script>
-let deferredInstallPrompt=null;
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=document.getElementById('pwaInstall');if(b)b.style.display='block';});
-document.addEventListener('click',async e=>{if(e.target&&e.target.id==='pwaInstall'&&deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;e.target.style.display='none';}});
-window.addEventListener('appinstalled',()=>{const b=document.getElementById('pwaInstall');if(b)b.style.display='none';});
-if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.warn));
 </script>
 </body></html>
