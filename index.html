@@ -304,17 +304,18 @@ function exportExcel(){
 }
 function exportPDF(){
  let rows=exportRows(),w=window.open('','_blank');if(!w)return toast('Please allow popups for PDF export');
- w.document.write(`<html><head><title>Radio Cafe Attendance</title><style>body{font-family:Arial;padding:25px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:left}h1{margin-bottom:4px}</style></head><body><h1>RADIO CAFE — Attendance Report</h1><p>${monthKey(now())}</p><table><tr><th>Employee</th><th>Team</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td>${r.late?'Late':'Present'}</td></tr>`).join('')}</table><script>window.print()<\/script><button id="pwaInstall" style="display:none;position:fixed;right:18px;bottom:18px;z-index:9999;padding:12px 16px;border:1px solid #e4b75d;border-radius:12px;background:#111317;color:#e4b75d;font-weight:800;cursor:pointer;box-shadow:0 8px 30px #0008">📲 Install App</button>
+ w.document.write(`<html><head><title>Radio Cafe Attendance</title><style>body{font-family:Arial;padding:25px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:left}h1{margin-bottom:4px}</style></head><body><h1>RADIO CAFE — Attendance Report</h1><p>${monthKey(now())}</p><table><tr><th>Employee</th><th>Team</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td>${r.late?'Late':'Present'}</td></tr>`).join('')}</table><script>window.print()<\/script></body></html>`);w.document.close()
+}
+function downloadBlob(content,name,type){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function render(){data.session?shell():loginPage()}
+render();
+</script>
+<button id="pwaInstall" style="display:none;position:fixed;right:18px;bottom:18px;z-index:9999;padding:12px 16px;border:1px solid #e4b75d;border-radius:12px;background:#111317;color:#e4b75d;font-weight:800;cursor:pointer;box-shadow:0 8px 30px #0008">📲 Install App</button>
 <script>
 let deferredInstallPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=document.getElementById('pwaInstall');if(b)b.style.display='block';});
 document.addEventListener('click',async e=>{if(e.target&&e.target.id==='pwaInstall'&&deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;e.target.style.display='none';}});
 window.addEventListener('appinstalled',()=>{const b=document.getElementById('pwaInstall');if(b)b.style.display='none';});
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.warn));
-</script></body></html>`);w.document.close()
-}
-function downloadBlob(content,name,type){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-function render(){data.session?shell():loginPage()}
-render();
 </script>
 </body></html>
