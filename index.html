@@ -43,7 +43,7 @@ body[data-theme="light"] th{border-color:#dfe2e8} body[data-theme="light"] td{bo
 body[data-theme="light"] .modal-box{background:#fff}
 </style>
 
-</head>
+<link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#08090c"><link rel="icon" type="image/svg+xml" href="./icon.svg"><link rel="apple-touch-icon" href="./icon-192.png"></head>
 <body><div id="app"></div><div class="toast" id="toast"></div>
 
 
@@ -154,13 +154,24 @@ function statsFor(empId,month){
 }
 window.firstSetup=firstSetup;
 async function login(){
- let u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;if(!u||!p)return toast('Enter username and password');
+ const email=$('loginEmail').value.trim(),pass=$('loginPass').value;
+ if(!email||!pass)return toast('Enter email and password.');
+ if(!firebaseReady)return toast('Firebase is not configured yet.');
  try{
-  const email=u.includes('@')?u:`${u}@radiocafe.app`,cred=await fb.signInWithEmailAndPassword(firebaseAuth,email,p),us=await fb.getDoc(fb.doc(firebaseDb,'users',cred.user.uid));
-  if(!us.exists())throw new Error('User profile is missing');const profile=us.data();
-  data.session=profile.role==='Admin'?{id:'admin',uid:cred.user.uid,name:profile.name||'Administrator',role:'Admin',username:profile.username||u}:{id:String(profile.employeeId),uid:cred.user.uid,name:profile.name||u,role:profile.role||'Staff',username:profile.username||u};
-  cloudReady=true;await loadCloud();if(data.session.role!=='Admin'){const e=employee(data.session.id);if(e)data.session={...e,uid:cred.user.uid}}startCloud();render();
- }catch(e){console.error(e);toast(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found'?'Wrong username or password':(e.message||'Login failed'))}
+  const cred=await signInWithEmailAndPassword(auth,email,pass),u=cred.user;
+  let userDoc=null; try{userDoc=await getCloud('users',u.uid)}catch{}
+  const role=userDoc?.role||'employee';
+  if(role!=='Admin'){
+    const employeeId=userDoc?.employeeId;
+    let emp=null;
+    if(employeeId)try{emp=await getCloud('employees',employeeId)}catch{}
+    if(!emp){try{await signOut(auth)}catch{} data.session=null;save(); return toast('This employee account has been deleted.');}
+    data.session={uid:u.uid,email:u.email,role,name:emp.name||userDoc.name||u.email.split('@')[0],id:emp.id,team:emp.team||'',weeklyOff:emp.weeklyOff||'',image:emp.image||''};
+  }else{
+    data.session={uid:u.uid,email:u.email,role:'Admin',name:userDoc?.name||'Administrator',id:u.uid,team:'',weeklyOff:'',image:''};
+  }
+  save();toast('Welcome back!');render();
+ }catch(e){toast('Login failed: '+e.message)}
 }
 async function logout(){stopCloud();cloudReady=false;try{await fb.signOut(firebaseAuth)}catch(e){}data.session=null;localStorage.setItem(DBKEY,JSON.stringify(data));render()}
 function loginPage(){
@@ -195,14 +206,23 @@ function renderAttendance(){
  <div class="card"><h3>Live Clock</h3><div id="clock" style="font-size:32px;font-weight:800;color:var(--gold)">--:--:--</div><p class="sub">Shift: ${data.settings.shiftStart} → ${data.settings.shiftEnd} • Late after shift start</p></div></div>`;
  setInterval(()=>{let c=document.getElementById('clock');if(c)c.textContent=now().toLocaleTimeString('en-GB')},1000)
 }
-function checkIn(){
+async function checkIn(){
  let s=data.session,d=now();
  if(isWeeklyOff(s.id,d))return toast('📅 Today is your weekly day off.');
  if(isLeave(s.id,d))return toast('🏖️ You are on approved leave today.');
  if(myRecord())return;
  let [hh,mm]=data.settings.shiftStart.split(':').map(Number),late=d.getHours()>hh||(d.getHours()===hh&&d.getMinutes()>mm);
- data.records.push({id:Date.now(),empId:s.id,name:s.name,team:s.team,in:d.toISOString(),out:null,late});
- save();toast(late?'⚠️ Checked in — marked late':'🟢 Check in successful!');renderAttendance();renderDashboard();renderRecords()
+ const record={id:Date.now(),empId:s.id,name:s.name,team:s.team,in:d.toISOString(),out:null,late};
+ data.records.push(record); save();
+ try{
+   if(!cloudReady)throw new Error('Cloud connection is not ready. Please wait a moment and try again.');
+   await putCloud('records',record.id,record);
+   toast(late?'⚠️ Checked in — marked late':'🟢 Check in successful!');
+ }catch(e){
+   console.error(e); data.records=data.records.filter(r=>String(r.id)!==String(record.id)); save();
+   toast(e.message||'Could not save check in online'); return;
+ }
+ renderAttendance();renderDashboard();renderRecords();renderProfile();
 }
 function checkOut(){let r=myRecord();if(!r)return;r.out=now().toISOString();r.minutes=workMinutes(r);save();if(cloudReady)putCloud('records',r.id,r);toast(`🔴 Check out successful! Worked ${hm(r.minutes)}`);renderAttendance();renderDashboard();renderRecords();renderProfile()}
 function table(list){
@@ -284,7 +304,14 @@ function exportExcel(){
 }
 function exportPDF(){
  let rows=exportRows(),w=window.open('','_blank');if(!w)return toast('Please allow popups for PDF export');
- w.document.write(`<html><head><title>Radio Cafe Attendance</title><style>body{font-family:Arial;padding:25px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:left}h1{margin-bottom:4px}</style></head><body><h1>RADIO CAFE — Attendance Report</h1><p>${monthKey(now())}</p><table><tr><th>Employee</th><th>Team</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td>${r.late?'Late':'Present'}</td></tr>`).join('')}</table><script>window.print()<\/script></body></html>`);w.document.close()
+ w.document.write(`<html><head><title>Radio Cafe Attendance</title><style>body{font-family:Arial;padding:25px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:left}h1{margin-bottom:4px}</style></head><body><h1>RADIO CAFE — Attendance Report</h1><p>${monthKey(now())}</p><table><tr><th>Employee</th><th>Team</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.team)}</td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td>${r.late?'Late':'Present'}</td></tr>`).join('')}</table><script>window.print()<\/script><button id="pwaInstall" style="display:none;position:fixed;right:18px;bottom:18px;z-index:9999;padding:12px 16px;border:1px solid #e4b75d;border-radius:12px;background:#111317;color:#e4b75d;font-weight:800;cursor:pointer;box-shadow:0 8px 30px #0008">📲 Install App</button>
+<script>
+let deferredInstallPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=document.getElementById('pwaInstall');if(b)b.style.display='block';});
+document.addEventListener('click',async e=>{if(e.target&&e.target.id==='pwaInstall'&&deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;e.target.style.display='none';}});
+window.addEventListener('appinstalled',()=>{const b=document.getElementById('pwaInstall');if(b)b.style.display='none';});
+if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.warn));
+</script></body></html>`);w.document.close()
 }
 function downloadBlob(content,name,type){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function render(){data.session?shell():loginPage()}
