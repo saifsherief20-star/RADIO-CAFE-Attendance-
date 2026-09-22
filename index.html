@@ -80,7 +80,7 @@ async function firstSetup(){
   const username=(prompt('ADMIN username:','admin')||'').trim(),password=prompt('ADMIN password (6+ characters):')||'',name=(prompt('ADMIN name:','Administrator')||'Administrator').trim();
   if(!username||password.length<6)return toast('Enter username and password (6+ characters)');
   const email=`${username}@radiocafe.app`,cred=await fb.createUserWithEmailAndPassword(firebaseAuth,email,password);
-  await fb.setDoc(fb.doc(firebaseDb,'users',cred.user.uid),{uid:cred.user.uid,name,role:'Admin',username,email});
+  await fb.setDoc(fb.doc(firebaseDb,'users',cred.user.uid),{uid:cred.user.uid,name,role:'Admin',username,email,active:true});
   // Employees are created by the Admin from inside the app.
   for(const t of defaultData.teams)await fb.setDoc(cloudRef('teams',t),{name:t});
   await fb.setDoc(fb.doc(firebaseDb,'settings','main'),defaultData.settings);
@@ -163,6 +163,7 @@ async function login(){
   if(!us.exists())throw new Error('User profile is missing');
   const profile=us.data();
   if(profile.active===false)throw new Error('This account is inactive. Contact the administrator.');
+  if(profile.role==='Admin' && profile.active===undefined){await fb.setDoc(fb.doc(firebaseDb,'users',cred.user.uid),{active:true},{merge:true});profile.active=true;}
   data.session=profile.role==='Admin'
    ?{id:'admin',uid:cred.user.uid,name:profile.name||'Administrator',role:'Admin',username:profile.username||u}
    :{id:String(profile.employeeId),uid:cred.user.uid,name:profile.name||u,role:profile.role||'Staff',username:profile.username||u};
@@ -228,7 +229,7 @@ async function checkIn(){
    renderAttendance();renderDashboard();renderRecords();renderProfile();
  }catch(e){console.error(e);toast(e?.code==='permission-denied'?'Permission denied by Firebase rules':(e?.message||'Check in was not saved'))}
 }
-async function checkOut(){let r=myRecord();if(!r)return;r.out=now().toISOString();r.minutes=workMinutes(r);save();if(cloudReady)putCloud('records',r.id,r);toast(`🔴 Check out successful! Worked ${hm(r.minutes)}`);renderAttendance();renderDashboard();renderRecords();renderProfile()}
+async function checkOut(){let r=myRecord();if(!r)return;const updated={...r,out:now().toISOString()};updated.minutes=workMinutes(updated);try{if(!cloudReady)throw new Error('Firebase is not connected');await putCloud('records',updated.id,updated);const i=data.records.findIndex(x=>String(x.id)===String(updated.id));if(i>=0)data.records[i]=updated;else data.records.push(updated);save();toast(`🔴 Check out successful! Worked ${hm(updated.minutes)}`);renderAttendance();renderDashboard();renderRecords();renderProfile()}catch(e){console.error(e);toast(e?.code==='permission-denied'?'Permission denied by Firebase rules':(e?.message||'Check out was not saved'))}}
 function table(list){
  if(!list.length)return `<p class="sub">No attendance records yet.</p>`;
  return `<table><thead><tr><th>Employee</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr></thead><tbody>${list.map(r=>`<tr><td><b>${esc(r.name)}</b><br><small style="color:var(--muted)">${esc(r.team||'')}</small></td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td><span class="badge ${r.late?'late':'present'}">${r.late?'LATE':'ON TIME'}</span>${!r.out?'<span class="badge late" style="margin-left:4px">NO CHECK OUT</span>':''}</td></tr>`).join('')}</tbody></table>`
@@ -284,7 +285,7 @@ function renderLeaves(){
  el.innerHTML=`<div class="card"><div class="toolbar"><div><h3>🏖️ Leave Management</h3><p class="sub">Approved leave days are excluded from absence calculations.</p></div><button class="mini gold" onclick="leaveModal()">+ Add Leave</button></div><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Reason</th><th>From</th><th>To</th><th>Actions</th></tr></thead><tbody>${data.leaves.slice().reverse().map(l=>`<tr><td><b>${esc(employee(l.empId)?.name||l.empName)}</b></td><td>${esc(l.reason)}</td><td>${l.from}</td><td>${l.to}</td><td><button class="mini" onclick="removeLeave(${l.id})">Delete</button></td></tr>`).join('')||'<tr><td colspan="5">No leave records.</td></tr>'}</tbody></table></div></div>`
 }
 function leaveModal(){document.getElementById('modal').innerHTML=`<div class="modal-box"><h3>Add Employee Leave</h3><div class="field"><label>EMPLOYEE</label><select id="le"><option value="">Choose employee</option>${data.employees.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div><div class="field"><label>REASON</label><input id="lr" placeholder="Vacation, personal, etc."></div><div class="row"><div class="field"><label>FROM</label><input id="lf" type="date"></div><div class="field"><label>TO</label><input id="lt" type="date"></div></div><button class="primary" onclick="addLeave()">Save Leave</button><button class="mini" style="margin-top:10px" onclick="closeModal()">Cancel</button></div>`;document.getElementById('modal').classList.add('show')}
-function addLeave(){if(!le.value||!lf.value||!lt.value||lf.value>lt.value)return toast('Complete valid leave dates');const leave={id:String(Date.now()),empId:String(le.value),reason:lr.value||'Leave',from:lf.value,to:lt.value};data.leaves.push(leave);save();if(cloudReady)putCloud('leaves',leave.id,leave);closeModal();renderLeaves();toast('🏖️ Leave saved')}
+async function addLeave(){if(!le.value||!lf.value||!lt.value||lf.value>lt.value)return toast('Complete valid leave dates');const leave={id:String(Date.now()),empId:String(le.value),reason:lr.value||'Leave',from:lf.value,to:lt.value};try{if(!cloudReady)throw new Error('Firebase is not connected');await putCloud('leaves',leave.id,leave);data.leaves.push(leave);save();closeModal();renderLeaves();toast('🏖️ Leave saved')}catch(e){console.error(e);toast(e?.message||'Leave was not saved')}}
 async function removeLeave(id){data.leaves=data.leaves.filter(x=>String(x.id)!==String(id));await deleteCloud('leaves',id);save();renderLeaves();toast('Leave removed')}
 function renderTeams(){let el=document.getElementById('teams');if(!el)return;el.innerHTML=`<div class="card"><div class="toolbar"><h3>Teams</h3><button class="mini gold" onclick="teamModal()">+ Add Team</button></div><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">${data.teams.map(t=>`<div class="stat"><div class="label">TEAM</div><div class="num" style="font-size:18px">${esc(t)}</div><div style="margin-top:10px;color:var(--muted);font-size:12px">${data.employees.filter(e=>e.team===t).length} members</div></div>`).join('')}</div></div>`}
 function teamModal(){document.getElementById('modal').innerHTML=`<div class="modal-box"><h3>Create Team</h3><div class="field"><input id="tn" placeholder="Team name"></div><button class="primary" onclick="addTeam()">Create Team</button><button class="mini" style="margin-top:10px" onclick="closeModal()">Cancel</button></div>`;document.getElementById('modal').classList.add('show')}
