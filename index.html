@@ -43,18 +43,18 @@ body[data-theme="light"] th{border-color:#dfe2e8} body[data-theme="light"] td{bo
 body[data-theme="light"] .modal-box{background:#fff}
 </style>
 
-<link rel="icon" href="./favicon.ico"><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#08090c"></head>
+</head>
 <body><div id="app"></div><div class="toast" id="toast"></div>
 
 
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
-import {getAuth,signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+import {getAuth,signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword,EmailAuthProvider,reauthenticateWithCredential,updateEmail,updatePassword} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 const firebaseConfig={apiKey:"AIzaSyCF51yHrQOQAxRqvF-Z0ljOPy_x7SsTy2Q",authDomain:"radio-cafe-attendance.firebaseapp.com",projectId:"radio-cafe-attendance",storageBucket:"radio-cafe-attendance.firebasestorage.app",messagingSenderId:"552741618941",appId:"1:552741618941:web:1b8aef53287cf5a7b22a94",measurementId:"G-3XDHRRHFCR"};
 window.firebaseApp=initializeApp(firebaseConfig);window.firebaseAuth=getAuth(window.firebaseApp);window.firebaseDb=getFirestore(window.firebaseApp);
 window.firebaseSecondaryApp=initializeApp(firebaseConfig,"secondary");window.firebaseSecondaryAuth=getAuth(window.firebaseSecondaryApp);
-window.fb={signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot};
+window.fb={signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword,EmailAuthProvider,reauthenticateWithCredential,updateEmail,updatePassword,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot};
 </script>
 
 <script>
@@ -91,9 +91,9 @@ async function firstSetup(){
 
 const defaultData={
  employees:[
-  {id:1,name:'Saif Sherief',role:'Team Leader',team:'Management',username:'saif',password:'1234',image:'',weeklyOff:'Friday'},
-  {id:2,name:'Ahmed Mohamed',role:'Staff',team:'Service',username:'ahmed',password:'1234',image:'',weeklyOff:'Friday'},
-  {id:3,name:'Omar Ali',role:'Staff',team:'Kitchen',username:'omar',password:'1234',image:'',weeklyOff:'Friday'}
+  {id:1,name:'Saif Sherief',role:'Team Leader',team:'Management',username:'saif',password:'1234',image:'',weeklyOff:'Friday',active:true},
+  {id:2,name:'Ahmed Mohamed',role:'Staff',team:'Service',username:'ahmed',password:'1234',image:'',weeklyOff:'Friday',active:true},
+  {id:3,name:'Omar Ali',role:'Staff',team:'Kitchen',username:'omar',password:'1234',image:'',weeklyOff:'Friday',active:true}
  ],
  teams:['Management','Service','Kitchen'],
  records:[],
@@ -103,20 +103,20 @@ const defaultData={
  session:null
 };
 let data=JSON.parse(localStorage.getItem(DBKEY)||'null')||defaultData;
-data.employees=(data.employees||[]).map(e=>({...e,image:e.image||'',weeklyOff:e.weeklyOff||data.settings?.weeklyOff||'Friday'}));
+data.employees=(data.employees||[]).map(e=>({...e,active:e.active!==false,image:e.image||'',weeklyOff:e.weeklyOff||data.settings?.weeklyOff||'Friday'}));
 data.teams=data.teams||[];
 data.records=data.records||[];
 data.leaves=data.leaves||[];
 data.settings={...defaultData.settings,...(data.settings||{})};
 data.admin={...defaultData.admin,...(data.admin||{})};
 
-function $(id){return document.getElementById(id)}
 function save(){localStorage.setItem(DBKEY,JSON.stringify(data))}
 function now(){return new Date()}
 function fmt(d){return d?new Date(d).toLocaleString('en-GB',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short',year:'numeric'}):'—'}
-function dateKey(d){return new Date(d).toISOString().slice(0,10)}
-function monthKey(d){return new Date(d).toISOString().slice(0,7)}
-function today(){return dateKey(now())}
+function localDateKey(d=new Date()){const x=new Date(d);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`}
+function dateKey(d){return localDateKey(d)}
+function monthKey(d){return localDateKey(d).slice(0,7)}
+function today(){return localDateKey(now())}
 function toast(msg){let t=document.getElementById('toast');if(!t)return;t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)}
 function initials(name){return (name||'?').split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase()}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -135,15 +135,6 @@ function scheduledDays(empId,month){
  const [y,m]=month.split('-').map(Number), days=new Date(y,m,0).getDate();
  let n=0; for(let i=1;i<=days;i++){let d=new Date(y,m-1,i);if(!isWeeklyOff(empId,d)&&!isLeave(empId,d))n++}
  return n;
-}
-function table(rows){
- let h=`<table><thead><tr><th>Employee</th><th>Team</th><th>Check In</th><th>Check Out</th><th>Status</th></tr></thead><tbody>`;
- if(!rows.length) return '<div class="sub" style="padding:18px">No attendance records yet.</div>';
- rows.forEach(r=>{
-  const fmt=v=>v?new Date(v).toLocaleString('en-GB',{dateStyle:'short',timeStyle:'short'}):'—';
-  h+=`<tr><td><b>${esc(r.name||'')}</b></td><td>${esc(r.team||'')}</td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.late?'⚠️ Late':(r.out?'✅ Complete':'🔴 Checked in')}</td></tr>`;
- });
- return h+'</tbody></table>';
 }
 function recordsFor(empId,month){
  return data.records.filter(r=>r.empId===empId&&monthKey(r.in)===month)
@@ -172,32 +163,25 @@ async function login(){
   const us=await fb.getDoc(fb.doc(firebaseDb,'users',cred.user.uid));
   if(!us.exists())throw new Error('User profile is missing');
   const profile=us.data();
-
-  // Admin is allowed through the admin profile.
-  if(profile.role==='Admin'){
-   data.session={id:'admin',uid:cred.user.uid,name:profile.name||'Administrator',role:'Admin',username:profile.username||u};
-  }else{
-   // An employee must still have an active employee document.
-   const employeeId=String(profile.employeeId||'');
-   let e=null;
-   if(employeeId){
-    const ed=await fb.getDoc(fb.doc(firebaseDb,'employees',employeeId));
-    if(ed.exists())e={id:ed.id,...ed.data()};
-   }
-   if(!e)throw new Error('This employee account has been deleted.');
-   data.session={...e,uid:cred.user.uid};
+  if(profile.active===false)throw new Error('This account is inactive. Contact the administrator.');
+  data.session=profile.role==='Admin'
+   ?{id:'admin',uid:cred.user.uid,name:profile.name||'Administrator',role:'Admin',username:profile.username||u}
+   :{id:String(profile.employeeId),uid:cred.user.uid,name:profile.name||u,role:profile.role||'Staff',username:profile.username||u};
+  cloudReady=true;await loadCloud();
+  if(data.session.role!=='Admin'){
+    const e=employee(data.session.id);
+    if(!e||e.active===false){await fb.signOut(firebaseAuth);cloudReady=false;throw new Error('This employee account is inactive.');}
+    data.session={...e,uid:cred.user.uid};
   }
-
-  cloudReady=true;await loadCloud();startCloud();render();
+  startCloud();render();
  }catch(e){
   console.error(e);
-  try{await fb.signOut(firebaseAuth)}catch(_){}
   toast(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password'||e.code==='auth/user-not-found'?'Wrong username or password':(e.message||'Login failed'));
  }
 }
 async function logout(){stopCloud();cloudReady=false;try{await fb.signOut(firebaseAuth)}catch(e){}data.session=null;localStorage.setItem(DBKEY,JSON.stringify(data));render()}
 function loginPage(){
- document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint">🔒 Secure staff attendance system</div></div></div>`
+ document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint>🔒 Secure staff attendance system</div></div></div>`
 }
 function nav(id,icon,label){return `<button id="nav-${id}" onclick="showPage('${id}')">${icon} <span>${label}</span></button>`}
 function shell(){
@@ -230,30 +214,25 @@ function renderAttendance(){
 }
 async function checkIn(){
  let s=data.session,d=now();
+ if(!s||s.role==='Admin')return;
  if(isWeeklyOff(s.id,d))return toast('📅 Today is your weekly day off.');
  if(isLeave(s.id,d))return toast('🏖️ You are on approved leave today.');
  if(myRecord())return;
- let [hh,mm]=data.settings.shiftStart.split(':').map(Number),late=d.getHours()>hh||(d.getHours()===hh&&d.getMinutes()>mm);
- const record={id:Date.now(),empId:s.id,name:s.name,team:s.team,in:d.toISOString(),out:null,late};
+ let [hh,mm]=data.settings.shiftStart.split(':').map(Number);
+ let late=d.getHours()>hh||(d.getHours()===hh&&d.getMinutes()>mm);
+ const record={id:String(Date.now()),empId:String(s.id),name:s.name,team:s.team,in:d.toISOString(),out:null,late,createdAt:d.toISOString()};
  try{
-  if(!cloudReady)throw new Error('Cloud connection is not ready.');
-  await putCloud('records',record.id,record);
-  data.records.push(record);save();
-  toast(late?'⚠️ Checked in — marked late':'🟢 Check in successful!');
-  renderAttendance();renderDashboard();renderRecords();renderProfile();
- }catch(e){
-  console.error(e);toast(e.message||'Could not save check in online');
- }
+   if(!cloudReady)throw new Error('Firebase is not connected');
+   await putCloud('records',record.id,record);
+   data.records.push(record);save();
+   toast(late?'⚠️ Checked in — marked late':'🟢 Check in successful!');
+   renderAttendance();renderDashboard();renderRecords();renderProfile();
+ }catch(e){console.error(e);toast(e?.code==='permission-denied'?'Permission denied by Firebase rules':(e?.message||'Check in was not saved'))}
 }
-async function checkOut(){
- let r=myRecord();if(!r)return;
- r.out=now().toISOString();r.minutes=workMinutes(r);
- try{
-  if(!cloudReady)throw new Error('Cloud connection is not ready.');
-  await putCloud('records',r.id,r);save();
-  toast(`🔴 Check out successful! Worked ${hm(r.minutes)}`);
-  renderAttendance();renderDashboard();renderRecords();renderProfile();
- }catch(e){console.error(e);toast(e.message||'Could not save check out online')}
+async function checkOut(){let r=myRecord();if(!r)return;r.out=now().toISOString();r.minutes=workMinutes(r);save();if(cloudReady)putCloud('records',r.id,r);toast(`🔴 Check out successful! Worked ${hm(r.minutes)}`);renderAttendance();renderDashboard();renderRecords();renderProfile()}
+function table(list){
+ if(!list.length)return `<p class="sub">No attendance records yet.</p>`;
+ return `<table><thead><tr><th>Employee</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th></tr></thead><tbody>${list.map(r=>`<tr><td><b>${esc(r.name)}</b><br><small style="color:var(--muted)">${esc(r.team||'')}</small></td><td>${fmt(r.in)}</td><td>${fmt(r.out)}</td><td>${r.out?hm(workMinutes(r)):'—'}</td><td><span class="badge ${r.late?'late':'present'}">${r.late?'LATE':'ON TIME'}</span>${!r.out?'<span class="badge late" style="margin-left:4px">NO CHECK OUT</span>':''}</td></tr>`).join('')}</tbody></table>`
 }
 function renderRecords(){
  let el=document.getElementById('records');if(!el)return;
@@ -270,7 +249,7 @@ function staffReport(id){
 }
 function renderEmployees(){
  let el=document.getElementById('employees');if(!el)return;
- el.innerHTML=`<div class="card"><div class="toolbar"><h3>Employees</h3><div style="display:flex;gap:8px"><button class="mini gold" onclick="employeeModal()">+ Add Employee</button></div></div><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Role</th><th>Team</th><th>Weekly Off</th><th>Actions</th></tr></thead><tbody>${data.employees.map(e=>`<tr><td><div style="display:flex;align-items:center;gap:9px"><div class="avatar">${e.image?`<img src="${e.image}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`:initials(e.name)}</div><b>${esc(e.name)}</b></div></td><td><span class="badge team">${esc(e.role)}</span></td><td>${esc(e.team)}</td><td>${esc(e.weeklyOff)}</td><td style="display:flex;gap:6px;flex-wrap:wrap"><button class="mini gold" onclick="staffReport(${e.id})">📊 Report</button><button class="mini" onclick="editEmp(${e.id})">Edit</button><button class="mini" onclick="removeEmp(${e.id})">Delete</button></td></tr>`).join('')}</tbody></table></div></div>`
+ el.innerHTML=`<div class="card"><div class="toolbar"><h3>Employees</h3><div style="display:flex;gap:8px"><button class="mini gold" onclick="employeeModal()">+ Add Employee</button></div></div><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Role</th><th>Team</th><th>Weekly Off</th><th>Status</th><th>Actions</th></tr></thead><tbody>${data.employees.map(e=>`<tr><td><div style="display:flex;align-items:center;gap:9px"><div class="avatar">${e.image?`<img src="${e.image}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`:initials(e.name)}</div><b>${esc(e.name)}</b></div></td><td><span class="badge team">${esc(e.role)}</span></td><td>${esc(e.team)}</td><td>${esc(e.weeklyOff)}</td><td><span class="badge ${e.active!==false?'present':'late'}">${e.active!==false?'ACTIVE':'INACTIVE'}</span></td><td style="display:flex;gap:6px;flex-wrap:wrap"><button class="mini gold" onclick="staffReport(${e.id})">📊 Report</button><button class="mini" onclick="editEmp(${e.id})">Edit</button><button class="mini" onclick="toggleEmployee(${e.id})">${e.active!==false?'Deactivate':'Activate'}</button></td></tr>`).join('')}</tbody></table></div></div>`
 }
 function employeeModal(id=null){
  let e=id?employee(id):{name:'',role:'Staff',team:data.teams[0]||'',username:'',password:'1234',weeklyOff:data.settings.weeklyOff,image:''};
@@ -280,7 +259,7 @@ function employeeModal(id=null){
 function readImage(cb){let f=document.getElementById('ei')?.files?.[0];if(!f)return cb(null);let rd=new FileReader();rd.onload=()=>cb(rd.result);rd.readAsDataURL(f)}
 async function addEmp(){
  let name=en.value.trim(),username=eu.value.trim(),password=ep.value;if(!name||!username||!password)return toast('Please complete all fields');if(password.length<6)return toast('Password must be at least 6 characters');
- readImage(async img=>{try{const email=`${username}@radiocafe.app`,cred=await fb.createUserWithEmailAndPassword(firebaseSecondaryAuth,email,password),id=String(Date.now()),emp={id,name,role:er.value,team:et.value,username,password:'',weeklyOff:eo.value,image:img||'',uid:cred.user.uid,email};
+ readImage(async img=>{try{const email=`${username}@radiocafe.app`,cred=await fb.createUserWithEmailAndPassword(firebaseSecondaryAuth,email,password),id=String(Date.now()),emp={id,name,role:er.value,team:et.value,username,password:'',weeklyOff:eo.value,image:img||'',uid:cred.user.uid,email,active:true};
  await fb.setDoc(cloudRef('employees',id),emp);await fb.setDoc(fb.doc(firebaseDb,'users',cred.user.uid),{uid:cred.user.uid,employeeId:id,name,role:emp.role,username,email});await fb.signOut(firebaseSecondaryAuth);closeModal();toast('Employee account created ✨')}
  catch(e){console.error(e);toast(e.code==='auth/email-already-in-use'?'Username already exists':(e.message||'Could not create account'))}});
 }
@@ -288,9 +267,18 @@ function editEmp(id){employeeModal(id)}
 async function saveEmpEdit(id){
  let e=employee(id);if(!e)return;readImage(async img=>{try{e.name=en.value.trim()||e.name;e.role=er.value;e.team=et.value;e.weeklyOff=eo.value;e.username=eu.value.trim()||e.username;if(img)e.image=img;await putCloud('employees',id,e);if(e.uid)await fb.setDoc(fb.doc(firebaseDb,'users',e.uid),{uid:e.uid,employeeId:String(id),name:e.name,role:e.role,username:e.username,email:e.email||`${e.username}@radiocafe.app`},{merge:true});closeModal();toast('Employee updated successfully ✨')}catch(err){console.error(err);toast(err.message||'Could not update employee')}})
 }
-async function removeEmp(id){
- if(!confirm('Delete this employee and their attendance data?'))return;const rs=data.records.filter(r=>String(r.empId)===String(id)),ls=data.leaves.filter(l=>String(l.empId)===String(id));
- try{await deleteCloud('employees',id);await Promise.all([...rs.map(r=>deleteCloud('records',r.id)),...ls.map(l=>deleteCloud('leaves',l.id))]);data.employees=data.employees.filter(x=>String(x.id)!==String(id));data.records=data.records.filter(x=>String(x.empId)!==String(id));data.leaves=data.leaves.filter(x=>String(x.empId)!==String(id));localStorage.setItem(DBKEY,JSON.stringify(data));renderEmployees();renderDashboard();toast('Employee removed')}catch(e){console.error(e);toast('Could not delete employee')}
+async function toggleEmployee(id){
+ const e=employee(id);if(!e)return;
+ const next=e.active===false;
+ try{
+   e.active=next;
+   await putCloud('employees',id,e);
+   if(e.uid)await fb.setDoc(fb.doc(firebaseDb,'users',e.uid),{active:next},{merge:true});
+   save();renderEmployees();toast(next?'Employee activated ✨':'Employee deactivated 🔒');
+ }catch(err){
+   e.active=!next;save();
+   console.error(err);toast(err?.message||'Could not update employee status');
+ }
 }
 function renderLeaves(){
  let el=document.getElementById('leaves');if(!el)return;
@@ -306,10 +294,12 @@ function renderShift(){
  let el=document.getElementById('shift');if(!el)return;let st=data.settings;
  el.innerHTML=`<div class="content-grid"><div class="card"><h3>Work Schedule</h3><p class="sub">Set working hours and the default weekly day off. Each employee can have a different day off from Employees.</p><div class="row"><div class="field"><label>SHIFT START</label><input id="shiftStart" type="time" value="${st.shiftStart}"></div><div class="field"><label>SHIFT END</label><input id="shiftEnd" type="time" value="${st.shiftEnd}"></div></div><div class="field"><label>DEFAULT WEEKLY OFF</label><select id="weeklyOff">${['Friday','Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday'].map(x=>`<option ${st.weeklyOff===x?'selected':''}>${x}</option>`).join('')}</select></div><button class="primary" onclick="saveShift()">Save Schedule</button></div><div class="card"><h3>Current Schedule</h3><div style="font-size:30px;font-weight:800;color:var(--gold)">${st.shiftStart}</div><p class="sub">Start of shift</p><div style="font-size:30px;font-weight:800;color:var(--blue)">${st.shiftEnd}</div><p class="sub">End of shift</p><div class="badge team">Default day off: ${st.weeklyOff}</div></div></div>`
 }
-function saveShift(){data.settings.shiftStart=shiftStart.value||'09:00';data.settings.shiftEnd=shiftEnd.value||'17:00';data.settings.weeklyOff=weeklyOff.value||'Friday';save();if(cloudReady)fb.setDoc(fb.doc(firebaseDb,'settings','main'),data.settings);renderShift();renderAttendance();toast('Schedule updated ⏰')}
-function renderProfile(){
- let el=document.getElementById('profile');if(!el)return;let s=data.session,e=s.role==='Admin'?null:employee(s.id),month=monthKey(now()),st=e?statsFor(e.id,month):null;
- el.innerHTML=`<div class="content-grid"><div class="card"><h3>👤 Profile</h3><div style="display:flex;align-items:center;gap:16px"><div class="avatar" style="width:80px;height:80px;font-size:28px">${e?.image?`<img src="${e.image}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`:initials(s.name)}</div><div><div style="font-size:24px;font-weight:800">${esc(s.name)}</div><p class="sub">${esc(s.role)} • ${esc(e?.team||'Full system access')}</p></div></div>${e?`<p><b>Username:</b> ${esc(e.username)}</p><p><b>Weekly off:</b> ${esc(e.weeklyOff)}</p>`:''}</div>${e?`<div class="card"><h3>📊 This Month</h3><div class="grid" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><div class="label">PRESENT</div><div class="num">${st.present}</div></div><div class="stat"><div class="label">LATE</div><div class="num">${st.late}</div></div><div class="stat"><div class="label">WORK HOURS</div><div class="num" style="font-size:21px">${hm(st.mins)}</div></div><div class="stat"><div class="label">COMPLIANCE</div><div class="num">${st.rate}%</div></div></div><h3 style="margin-top:20px">My Attendance</h3>${table(recordsFor(e.id,month).slice().reverse())}</div>`:'<div class="card"><h3>Administrator Profile</h3><p class="sub">Full system access.</p></div>'}</div>`
+async function saveShift(){
+ data.settings.shiftStart=shiftStart.value||'09:00';data.settings.shiftEnd=shiftEnd.value||'17:00';data.settings.weeklyOff=weeklyOff.value||'Friday';
+ try{
+  if(cloudReady)await fb.setDoc(fb.doc(firebaseDb,'settings','main'),data.settings);
+  save();renderShift();renderAttendance();toast('Schedule updated ⏰');
+ }catch(e){console.error(e);toast(e.message||'Schedule was not saved')}
 }
 function renderAdminAccount(){let el=document.getElementById('adminaccount');if(!el)return;let a=data.admin;el.innerHTML=`<div class="content-grid"><div class="card"><h3>Admin Account Settings</h3><div class="field"><label>ADMIN NAME</label><input id="adminName" value="${esc(a.name)}"></div><div class="field"><label>USERNAME</label><input id="adminUser" value="${esc(a.username)}"></div><div class="field"><label>NEW PASSWORD</label><input id="adminPass" type="password" value="${esc(a.password)}"></div><button class="primary" onclick="saveAdminAccount()">Save Admin Changes</button></div><div class="card"><h3>Administrator</h3><div class="avatar" style="width:65px;height:65px;font-size:26px;margin-bottom:15px">${initials(a.name)}</div><div style="font-size:22px;font-weight:800">${esc(a.name)}</div><p class="sub">Full system access</p><div class="badge team">ADMIN</div></div></div>`}
 function saveAdminAccount(){let name=adminName.value.trim(),user=adminUser.value.trim(),pass=adminPass.value;if(!name||!user||!pass)return toast('Please complete all admin details');data.admin={name,username:user,password:pass};if(data.session?.role==='Admin')data.session={id:'admin',name,role:'Admin',username:user};save();renderAdminAccount();toast('Admin account updated 🔐')}
