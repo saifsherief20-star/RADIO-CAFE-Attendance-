@@ -77,7 +77,6 @@ function startCloud(){
 }
 async function firstSetup(){
  try{
-  const existing=await fb.getDocs(fb.collection(firebaseDb,'users'));if(!existing.empty)return toast('Admin setup is already completed');
   const username=(prompt('ADMIN username:','admin')||'').trim(),password=prompt('ADMIN password (6+ characters):')||'',name=(prompt('ADMIN name:','Administrator')||'Administrator').trim();
   if(!username||password.length<6)return toast('Enter username and password (6+ characters)');
   const email=`${username}@radiocafe.app`,cred=await fb.createUserWithEmailAndPassword(firebaseAuth,email,password);
