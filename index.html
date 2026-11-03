@@ -50,11 +50,10 @@ body[data-theme="light"] .modal-box{background:#fff}
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {getAuth,signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword,EmailAuthProvider,reauthenticateWithCredential,updateEmail,updatePassword} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
-import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
-const firebaseConfig={apiKey:"AIzaSyCF51yHrQOQAxRqvF-Z0ljOPy_x7SsTy2Q",authDomain:"radio-cafe-attendance.firebaseapp.com",projectId:"radio-cafe-attendance",storageBucket:"radio-cafe-attendance.firebasestorage.app",messagingSenderId:"552741618941",appId:"1:552741618941:web:1b8aef53287cf5a7b22a94",measurementId:"G-3XDHRRHFCR"};
+import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,query,where} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";const firebaseConfig={apiKey:"AIzaSyCF51yHrQOQAxRqvF-Z0ljOPy_x7SsTy2Q",authDomain:"radio-cafe-attendance.firebaseapp.com",projectId:"radio-cafe-attendance",storageBucket:"radio-cafe-attendance.firebasestorage.app",messagingSenderId:"552741618941",appId:"1:552741618941:web:1b8aef53287cf5a7b22a94",measurementId:"G-3XDHRRHFCR"};
 window.firebaseApp=initializeApp(firebaseConfig);window.firebaseAuth=getAuth(window.firebaseApp);window.firebaseDb=getFirestore(window.firebaseApp);
 window.firebaseSecondaryApp=initializeApp(firebaseConfig,"secondary");window.firebaseSecondaryAuth=getAuth(window.firebaseSecondaryApp);
-window.fb={signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword,EmailAuthProvider,reauthenticateWithCredential,updateEmail,updatePassword,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot};
+window.fb={signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword,EmailAuthProvider,reauthenticateWithCredential,updateEmail,updatePassword,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,query,where};
 </script>
 
 <script>
@@ -63,17 +62,194 @@ let cloudReady=false,cloudUnsubs=[],clockTimer=null;
 function cloudRef(c,id){return fb.doc(firebaseDb,c,String(id))}
 function stopCloud(){cloudUnsubs.forEach(u=>{try{u()}catch(e){}});cloudUnsubs=[]}
 async function loadCloud(){
- const [e,t,r,l,s]=await Promise.all([fb.getDocs(fb.collection(firebaseDb,'employees')),fb.getDocs(fb.collection(firebaseDb,'teams')),fb.getDocs(fb.collection(firebaseDb,'records')),fb.getDocs(fb.collection(firebaseDb,'leaves')),fb.getDoc(fb.doc(firebaseDb,'settings','main'))]);
- data.employees=e.docs.map(x=>({id:x.id,...x.data()}));data.teams=t.docs.map(x=>x.data().name).filter(Boolean);data.records=r.docs.map(x=>({id:x.id,...x.data()}));data.leaves=l.docs.map(x=>({id:x.id,...x.data()}));if(s.exists())data.settings={...defaultData.settings,...s.data()};localStorage.setItem(DBKEY,JSON.stringify(data));
+ const isAdmin = data.session && data.session.role === 'Admin';
+
+ if(isAdmin){
+
+  const [e,t,r,l,s] = await Promise.all([
+   fb.getDocs(fb.collection(firebaseDb,'employees')),
+   fb.getDocs(fb.collection(firebaseDb,'teams')),
+   fb.getDocs(fb.collection(firebaseDb,'records')),
+   fb.getDocs(fb.collection(firebaseDb,'leaves')),
+   fb.getDoc(fb.doc(firebaseDb,'settings','main'))
+  ]);
+
+  data.employees = e.docs.map(x=>({id:x.id,...x.data()}));
+  data.teams = t.docs.map(x=>x.data().name).filter(Boolean);
+  data.records = r.docs.map(x=>({id:x.id,...x.data()}));
+  data.leaves = l.docs.map(x=>({id:x.id,...x.data()}));
+
+  if(s.exists()){
+   data.settings={...defaultData.settings,...s.data()};
+  }
+
+ }else{
+
+  const uid = data.session.uid || data.session.id;
+
+  const [e,t,r,s] = await Promise.all([
+
+   fb.getDoc(
+    fb.doc(firebaseDb,'employees',uid)
+   ),
+
+   fb.getDocs(
+    fb.collection(firebaseDb,'teams')
+   ),
+
+   fb.getDocs(
+    fb.query(
+     fb.collection(firebaseDb,'records'),
+     fb.where('empId','==',uid)
+    )
+   ),
+
+   fb.getDoc(
+    fb.doc(firebaseDb,'settings','main')
+   )
+
+  ]);
+
+  if(!e.exists()){
+   throw new Error('Employee profile not found');
+  }
+
+  data.employees=[{id:e.id,...e.data()}];
+
+  data.teams=t.docs.map(x=>x.data().name).filter(Boolean);
+
+  data.records=r.docs.map(x=>({id:x.id,...x.data()}));
+
+  data.leaves=[];
+
+  if(s.exists()){
+   data.settings={...defaultData.settings,...s.data()};
+  }
+ }
+
+ localStorage.setItem(DBKEY,JSON.stringify(data));
 }
-async function putCloud(c,id,obj){if(cloudReady)await fb.setDoc(cloudRef(c,id),obj)}
 async function deleteCloud(c,id){if(cloudReady)await fb.deleteDoc(cloudRef(c,id))}
 function startCloud(){
+
  stopCloud();
- cloudUnsubs.push(fb.onSnapshot(fb.collection(firebaseDb,'employees'),s=>{data.employees=s.docs.map(x=>({id:x.id,...x.data()}));localStorage.setItem(DBKEY,JSON.stringify(data));if(data.session){renderDashboard();renderAttendance();renderEmployees();renderRecords();renderProfile()}}));
- cloudUnsubs.push(fb.onSnapshot(fb.collection(firebaseDb,'teams'),s=>{data.teams=s.docs.map(x=>x.data().name).filter(Boolean);localStorage.setItem(DBKEY,JSON.stringify(data));if(data.session){renderTeams();renderEmployees();renderRecords()}}));
- cloudUnsubs.push(fb.onSnapshot(fb.collection(firebaseDb,'records'),s=>{data.records=s.docs.map(x=>({id:x.id,...x.data()}));localStorage.setItem(DBKEY,JSON.stringify(data));if(data.session){renderDashboard();renderAttendance();renderRecords();renderProfile()}}));
- cloudUnsubs.push(fb.onSnapshot(fb.collection(firebaseDb,'leaves'),s=>{data.leaves=s.docs.map(x=>({id:x.id,...x.data()}));localStorage.setItem(DBKEY,JSON.stringify(data));if(data.session){renderLeaves();renderDashboard();renderProfile()}}));
+
+ const isAdmin = data.session && data.session.role === 'Admin';
+
+ if(isAdmin){
+
+  cloudUnsubs.push(fb.onSnapshot(
+   fb.collection(firebaseDb,'employees'),
+   s=>{
+    data.employees=s.docs.map(x=>({id:x.id,...x.data()}));
+    localStorage.setItem(DBKEY,JSON.stringify(data));
+
+    if(data.session){
+     renderDashboard();
+     renderAttendance();
+     renderEmployees();
+     renderRecords();
+     renderProfile();
+    }
+   }
+  ));
+
+  cloudUnsubs.push(fb.onSnapshot(
+   fb.collection(firebaseDb,'teams'),
+   s=>{
+    data.teams=s.docs.map(x=>x.data().name).filter(Boolean);
+    localStorage.setItem(DBKEY,JSON.stringify(data));
+
+    if(data.session){
+     renderTeams();
+     renderEmployees();
+     renderRecords();
+    }
+   }
+  ));
+
+  cloudUnsubs.push(fb.onSnapshot(
+   fb.collection(firebaseDb,'records'),
+   s=>{
+    data.records=s.docs.map(x=>({id:x.id,...x.data()}));
+    localStorage.setItem(DBKEY,JSON.stringify(data));
+
+    if(data.session){
+     renderDashboard();
+     renderAttendance();
+     renderRecords();
+     renderProfile();
+    }
+   }
+  ));
+
+  cloudUnsubs.push(fb.onSnapshot(
+   fb.collection(firebaseDb,'leaves'),
+   s=>{
+    data.leaves=s.docs.map(x=>({id:x.id,...x.data()}));
+    localStorage.setItem(DBKEY,JSON.stringify(data));
+
+    if(data.session){
+     renderLeaves();
+     renderDashboard();
+     renderProfile();
+    }
+   }
+  ));
+
+ }else{
+
+  const uid=data.session.uid || data.session.id;
+
+  cloudUnsubs.push(fb.onSnapshot(
+   fb.doc(firebaseDb,'employees',uid),
+   s=>{
+    if(s.exists()){
+     data.employees=[{id:s.id,...s.data()}];
+    }
+
+    localStorage.setItem(DBKEY,JSON.stringify(data));
+
+    if(data.session){
+     renderDashboard();
+     renderAttendance();
+     renderProfile();
+    }
+   }
+  ));
+
+  cloudUnsubs.push(fb.onSnapshot(
+   fb.collection(firebaseDb,'teams'),
+   s=>{
+    data.teams=s.docs.map(x=>x.data().name).filter(Boolean);
+    localStorage.setItem(DBKEY,JSON.stringify(data));
+
+    if(data.session){
+     renderTeams();
+    }
+   }
+  ));
+
+  cloudUnsubs.push(fb.onSnapshot(
+   fb.query(
+    fb.collection(firebaseDb,'records'),
+    fb.where('empId','==',uid)
+   ),
+   s=>{
+    data.records=s.docs.map(x=>({id:x.id,...x.data()}));
+    localStorage.setItem(DBKEY,JSON.stringify(data));
+
+    if(data.session){
+     renderDashboard();
+     renderAttendance();
+     renderRecords();
+     renderProfile();
+    }
+   }
+  ));
+
+  data.leaves=[];
+ }
 }
 async function firstSetup(){
  try{
