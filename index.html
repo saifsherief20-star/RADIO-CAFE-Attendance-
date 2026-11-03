@@ -59,7 +59,7 @@ window.fb={signInWithEmailAndPassword,signOut,createUserWithEmailAndPassword,Ema
 
 <script>
 const DBKEY='radioCafeAttendancePremium';
-let cloudReady=false,cloudUnsubs=[];
+let cloudReady=false,cloudUnsubs=[],clockTimer=null;
 function cloudRef(c,id){return fb.doc(firebaseDb,c,String(id))}
 function stopCloud(){cloudUnsubs.forEach(u=>{try{u()}catch(e){}});cloudUnsubs=[]}
 async function loadCloud(){
@@ -121,9 +121,10 @@ function initials(name){return (name||'?').split(/\s+/).map(x=>x[0]).slice(0,2).
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function isLeave(empId,d){
  const k=dateKey(d);
- return data.leaves.find(l=>l.empId===empId && k>=l.from && k<=l.to);
+  return data.leaves.find(l=>sameId(l.empId,empId) && k>=l.from && k<=l.to);
 }
-function employee(id){return data.employees.find(e=>e.id===id)}
+function sameId(a,b){return String(a)===String(b)}
+function employee(id){return data.employees.find(e=>sameId(e.id,id))}
 function workMinutes(r){if(!r?.in||!r?.out)return 0;return Math.max(0,Math.round((new Date(r.out)-new Date(r.in))/60000))}
 function hm(m){return `${Math.floor(m/60)}h ${m%60}m`}
 function isWeeklyOff(emp,d){
@@ -136,20 +137,21 @@ function scheduledDays(empId,month){
  return n;
 }
 function recordsFor(empId,month){
- return data.records.filter(r=>r.empId===empId&&monthKey(r.in)===month)
+  return data.records.filter(r=>sameId(r.empId,empId)&&monthKey(r.in)===month)
 }
 function statsFor(empId,month){
  const rs=recordsFor(empId,month);
  const present=new Set(rs.map(r=>dateKey(r.in)));
  const late=rs.filter(r=>r.late).length;
  const mins=rs.reduce((a,r)=>a+workMinutes(r),0);
- let [y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate(),absent=0;
- for(let i=1;i<=days;i++){
+ let [y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate(),absent=0,expected=0;
+ const currentMonth=monthKey(now()),daysToAssess=month>currentMonth?0:(month===currentMonth?Math.min(days,now().getDate()):days);
+ for(let i=1;i<=daysToAssess;i++){
    let d=new Date(y,m-1,i),k=dateKey(d);
    if(isWeeklyOff(empId,d)||isLeave(empId,d))continue;
+   expected++;
    if(!present.has(k))absent++;
  }
- const expected=scheduledDays(empId,month);
  return {present:present.size,late,mins,absent,expected,rate:expected?Math.round(present.size/expected*100):100};
 }
 window.firstSetup=firstSetup;
@@ -181,17 +183,17 @@ async function login(){
 }
 async function logout(){stopCloud();cloudReady=false;try{await fb.signOut(firebaseAuth)}catch(e){}data.session=null;localStorage.setItem(DBKEY,JSON.stringify(data));render()}
 function loginPage(){
- document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint>🔒 Secure staff attendance system</div></div></div>`
+ document.getElementById('app').innerHTML=`<div class="login"><div class="orb o1"></div><div class="orb o2"></div><div class="login-card"><div class="brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><small>ATTENDANCE SYSTEM</small></div></div><h1>Welcome back</h1><p class="sub">Sign in to manage your attendance.</p><div class="field"><label>USERNAME</label><input id="u" placeholder="Enter username"></div><div class="field"><label>PASSWORD</label><input id="p" type="password" placeholder="Enter password"></div><button class="primary" onclick="login()">SIGN IN →</button><button class="mini" style="width:100%;margin-top:10px" onclick="firstSetup()">⚙️ First-time Admin Setup</button><div class="hint">🔒 Secure staff attendance system</div></div></div>`
 }
 function nav(id,icon,label){return `<button id="nav-${id}" onclick="showPage('${id}')">${icon} <span>${label}</span></button>`}
 function shell(){
  let s=data.session;
  document.getElementById('app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="side-brand"><div class="logo">📻</div><div><b>RADIO CAFE</b><span>ATTENDANCE</span></div></div><nav class="nav">
  ${nav('dashboard','◈','Dashboard')}${nav('attendance','◷','Attendance')}${s.role==='Admin'?nav('records','▤','Records'):''}${s.role==='Admin'?nav('employees','♟','Employees'):''}${s.role==='Admin'?nav('leaves','🏖','Leaves'):''}${s.role==='Admin'?nav('teams','◇','Teams'):''}${s.role==='Admin'?nav('shift','◴','Schedule'):''}${nav('profile','👤','Profile')}${s.role==='Admin'?nav('adminaccount','⚙','Admin Account'):''}
- </nav><button class="nav" style="margin-top:10px" onclick="toggleTheme()">☀️ <span>Dark / Light</span></button><nav class="nav"><button onclick="logout()">↪ <span>Logout</span></button></nav></aside>
+ </nav><nav class="nav" style="margin-top:10px"><button onclick="toggleTheme()">☀️ <span>Dark / Light</span></button></nav><nav class="nav"><button onclick="logout()">↪ <span>Logout</span></button></nav></aside>
  <main class="main"><div class="top"><div><h2 id="title">Dashboard</h2><p>RADIO CAFE • Premium Attendance Management</p></div><div class="user"><div class="avatar">${s.image?`<img src="${s.image}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`:initials(s.name)}</div><div><b>${esc(s.name)}</b><br><small style="color:var(--muted)">${esc(s.role)}</small></div></div></div>
  <section id="dashboard" class="page active"></section><section id="attendance" class="page"></section><section id="records" class="page"></section><section id="employees" class="page"></section><section id="leaves" class="page"></section><section id="teams" class="page"></section><section id="shift" class="page"></section><section id="profile" class="page"></section><section id="adminaccount" class="page"></section></main></div><div class="modal" id="modal"></div>`;
- applyTheme(); renderDashboard();renderAttendance();renderRecords();renderEmployees();renderLeaves();renderTeams();renderShift();renderProfile();renderAdminAccount()
+ applyTheme(); renderDashboard();renderAttendance();renderRecords();renderEmployees();renderLeaves();renderTeams();renderShift();renderProfile();renderAdminAccount();showPage('dashboard')
 }
 function showPage(id){
  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
@@ -200,17 +202,17 @@ function showPage(id){
 function recordsToday(){return data.records.filter(r=>dateKey(r.in)===today())}
 function renderDashboard(){
  let r=recordsToday(),late=r.filter(x=>x.late).length,out=r.filter(x=>x.out).length;
- let open=r.filter(x=>!x.out).length,missing=data.employees.filter(e=>!r.some(x=>x.empId===e.id));
+ let open=r.filter(x=>!x.out).length,missing=data.employees.filter(e=>!r.some(x=>sameId(x.empId,e.id)));
  let alerts=missing.length?`<div class="hint" style="margin:0 0 16px">⚠️ ${missing.length} employee(s) have not checked in today: ${missing.map(e=>esc(e.name)).join(', ')}</div>`:`<div class="hint" style="margin:0 0 16px">🟢 All employees have recorded attendance today.</div>`;
  document.getElementById('dashboard').innerHTML=`${alerts}<div class="grid"><div class="stat" style="--glow:#68a8ff"><span class="icon">👥</span><div class="label">TOTAL EMPLOYEES</div><div class="num">${data.employees.length}</div></div><div class="stat" style="--glow:#43d19e"><span class="icon">🟢</span><div class="label">CHECKED IN TODAY</div><div class="num">${r.length}</div></div><div class="stat" style="--glow:#ff6370"><span class="icon">⏰</span><div class="label">LATE TODAY</div><div class="num">${late}</div></div><div class="stat" style="--glow:#e4b75d"><span class="icon">✓</span><div class="label">CHECKED OUT</div><div class="num">${out}</div></div></div>
  <div class="content-grid"><div class="card"><h3>Today's Attendance</h3><div class="table-wrap">${table(r.slice().reverse().slice(0,8))}</div></div><div class="card"><h3>Smart Alerts 🔔</h3>${r.filter(x=>x.late).map(x=>`<p>⚠️ <b>${esc(x.name)}</b> was late today.</p>`).join('')||'<p class="sub">No late arrivals today.</p>'}${r.filter(x=>!x.out).map(x=>`<p>🔴 <b>${esc(x.name)}</b> has not checked out.</p>`).join('')||'<p class="sub">No missing check-outs.</p>'}<button class="mini gold" onclick="showPage('records')">Open Reports</button></div></div>`
 }
-function myRecord(){let s=data.session;if(s.role==='Admin')return null;return data.records.find(r=>r.empId===s.id&&dateKey(r.in)===today())}
+function myRecord(){let s=data.session;if(s.role==='Admin')return null;return data.records.find(r=>sameId(r.empId,s.id)&&dateKey(r.in)===today())}
 function renderAttendance(){
  let s=data.session,rec=myRecord();
  document.getElementById('attendance').innerHTML=`<div class="content-grid"><div class="card"><h3>Attendance Control</h3>${s.role==='Admin'?`<p class="sub">Admin can review attendance from Records and Staff Reports.</p>`:`<div class="attendance-actions"><button class="action checkin" ${rec?'disabled':''} onclick="checkIn()">🟢<b>${rec?'Already Checked In':'Check In'}</b><small>${rec?'Time: '+fmt(rec.in):'Start your work day'}</small></button><button class="action checkout" ${!rec||rec.out?'disabled':''} onclick="checkOut()">🔴<b>${rec&&rec.out?'Checked Out':'Check Out'}</b><small>${rec&&rec.out?'Time: '+fmt(rec.out):'End your work day'}</small></button></div>`}</div>
  <div class="card"><h3>Live Clock</h3><div id="clock" style="font-size:32px;font-weight:800;color:var(--gold)">--:--:--</div><p class="sub">Shift: ${data.settings.shiftStart} → ${data.settings.shiftEnd} • Late after shift start</p></div></div>`;
- setInterval(()=>{let c=document.getElementById('clock');if(c)c.textContent=now().toLocaleTimeString('en-GB')},1000)
+ clearInterval(clockTimer);clockTimer=setInterval(()=>{let c=document.getElementById('clock');if(c)c.textContent=now().toLocaleTimeString('en-GB')},1000)
 }
 async function checkIn(){
  let s=data.session,d=now();
@@ -260,7 +262,7 @@ function readImage(cb){let f=document.getElementById('ei')?.files?.[0];if(!f)ret
 async function addEmp(){
  let name=en.value.trim(),username=eu.value.trim(),password=ep.value;if(!name||!username||!password)return toast('Please complete all fields');if(password.length<6)return toast('Password must be at least 6 characters');
  readImage(async img=>{try{const email=`${username}@radiocafe.app`,cred=await fb.createUserWithEmailAndPassword(firebaseSecondaryAuth,email,password),id=String(Date.now()),emp={id,name,role:er.value,team:et.value,username,password:'',weeklyOff:eo.value,image:img||'',uid:cred.user.uid,email,active:true};
- await fb.setDoc(cloudRef('employees',id),emp);await fb.setDoc(fb.doc(firebaseDb,'users',cred.user.uid),{uid:cred.user.uid,employeeId:id,name,role:emp.role,username,email});await fb.signOut(firebaseSecondaryAuth);closeModal();toast('Employee account created ✨')}
+ await fb.setDoc(cloudRef('employees',id),emp);await fb.setDoc(fb.doc(firebaseDb,'users',cred.user.uid),{uid:cred.user.uid,employeeId:id,name,role:emp.role,username,email,active:true});await fb.signOut(firebaseSecondaryAuth);closeModal();toast('Employee account created ✨')}
  catch(e){console.error(e);toast(e.code==='auth/email-already-in-use'?'Username already exists':(e.message||'Could not create account'))}});
 }
 function editEmp(id){employeeModal(id)}
@@ -289,7 +291,7 @@ async function addLeave(){if(!le.value||!lf.value||!lt.value||lf.value>lt.value)
 async function removeLeave(id){data.leaves=data.leaves.filter(x=>String(x.id)!==String(id));await deleteCloud('leaves',id);save();renderLeaves();toast('Leave removed')}
 function renderTeams(){let el=document.getElementById('teams');if(!el)return;el.innerHTML=`<div class="card"><div class="toolbar"><h3>Teams</h3><button class="mini gold" onclick="teamModal()">+ Add Team</button></div><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">${data.teams.map(t=>`<div class="stat"><div class="label">TEAM</div><div class="num" style="font-size:18px">${esc(t)}</div><div style="margin-top:10px;color:var(--muted);font-size:12px">${data.employees.filter(e=>e.team===t).length} members</div></div>`).join('')}</div></div>`}
 function teamModal(){document.getElementById('modal').innerHTML=`<div class="modal-box"><h3>Create Team</h3><div class="field"><input id="tn" placeholder="Team name"></div><button class="primary" onclick="addTeam()">Create Team</button><button class="mini" style="margin-top:10px" onclick="closeModal()">Cancel</button></div>`;document.getElementById('modal').classList.add('show')}
-function addTeam(){let n=tn.value.trim();if(!n)return;if(data.teams.includes(n))return toast('Team already exists');data.teams.push(n);save();if(cloudReady)putCloud('teams',n,{name:n});closeModal();renderTeams();renderEmployees();toast('New team created ✨')}
+async function addTeam(){let n=tn.value.trim();if(!n)return;if(data.teams.includes(n))return toast('Team already exists');try{if(!cloudReady)throw new Error('Firebase is not connected');await putCloud('teams',n,{name:n});data.teams.push(n);save();closeModal();renderTeams();renderEmployees();toast('New team created ✨')}catch(e){console.error(e);toast(e?.message||'Team was not created')}}
 function renderShift(){
  let el=document.getElementById('shift');if(!el)return;let st=data.settings;
  el.innerHTML=`<div class="content-grid"><div class="card"><h3>Work Schedule</h3><p class="sub">Set working hours and the default weekly day off. Each employee can have a different day off from Employees.</p><div class="row"><div class="field"><label>SHIFT START</label><input id="shiftStart" type="time" value="${st.shiftStart}"></div><div class="field"><label>SHIFT END</label><input id="shiftEnd" type="time" value="${st.shiftEnd}"></div></div><div class="field"><label>DEFAULT WEEKLY OFF</label><select id="weeklyOff">${['Friday','Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday'].map(x=>`<option ${st.weeklyOff===x?'selected':''}>${x}</option>`).join('')}</select></div><button class="primary" onclick="saveShift()">Save Schedule</button></div><div class="card"><h3>Current Schedule</h3><div style="font-size:30px;font-weight:800;color:var(--gold)">${st.shiftStart}</div><p class="sub">Start of shift</p><div style="font-size:30px;font-weight:800;color:var(--blue)">${st.shiftEnd}</div><p class="sub">End of shift</p><div class="badge team">Default day off: ${st.weeklyOff}</div></div></div>`
